@@ -11,3 +11,7 @@
 # Local images directory (large files, should not be committed)
 public/images/
 public/images/**/*
+
+# Image backups (large files, should not be committed)
+public/images_backup/
+public/images_backup/**/*
