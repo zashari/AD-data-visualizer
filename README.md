@@ -1,6 +1,6 @@
 # AD Data Visualizer
 
-This repository contains a React-based 3D data viewer for visualizing Alzheimer's disease MRI data.
+AD Data Visualizer is an interactive web application built with React, TypeScript, and Three.js that enables researchers and medical professionals to explore and analyze Alzheimer's Disease (AD) MRI datasets in an immersive 3D environment. The application visualizes thousands of brain MRI slices arranged in a spherical 3D space, allowing users to filter images by anatomical plane (axial, coronal, sagittal), image version (original or enhanced), clinical classification (CN for cognitively normal or AD for Alzheimer's disease), and dataset split (training, validation, or test). Leveraging AWS CloudFront CDN for fast global image delivery and implementing performance optimizations such as Level of Detail (LOD) rendering with a maximum of 500 concurrent images, progressive batch loading, and service worker caching, the viewer provides smooth navigation and real-time image comparison capabilities. The application supports both cloud-hosted images via S3/CloudFront and local development workflows, making it suitable for both production deployments and offline research environments.
 
 ## 🖼️ 3D Data Viewer
 
