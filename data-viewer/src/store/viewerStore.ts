@@ -19,7 +19,7 @@ interface ViewerState {
   setLoadingProgress: (loaded: number, total: number) => void;
 }
 
-export const useViewerStore = create<ViewerState>((set) => ({
+export const useViewerStore = create<ViewerState>((set, get) => ({
   filters: {
     plane: 'axial', // Default to axial plane
     version: null,
@@ -36,7 +36,8 @@ export const useViewerStore = create<ViewerState>((set) => ({
   setFilters: (filters: FilterState) => set(() => ({ 
     filters, 
     isLoading: true,
-    isServiceWorkerLoading: true
+    isServiceWorkerLoading: true,
+    loadingProgress: { loaded: 0, total: 0 } // Reset progress on filter change
   })),
   
   setSelectedImage: (url: string | null, data?: any) => set({ 
@@ -59,7 +60,21 @@ export const useViewerStore = create<ViewerState>((set) => ({
     selectedImageData: null 
   }),
   
-  setLoadingProgress: (loaded: number, total: number) => set({ 
-    loadingProgress: { loaded, total } 
-  })
+  // Ensure progress only increases (monotonic) - never goes backwards
+  setLoadingProgress: (loaded: number, total: number) => {
+    const current = get().loadingProgress;
+    // Only update if new loaded count is greater than current (prevent regression)
+    const newLoaded = Math.max(current.loaded, Math.min(loaded, total));
+    const newTotal = total > 0 ? total : current.total;
+    
+    // Only update if there's actual progress or total changed
+    if (newLoaded > current.loaded || newTotal !== current.total) {
+      set({ 
+        loadingProgress: { 
+          loaded: newLoaded, 
+          total: newTotal 
+        } 
+      });
+    }
+  }
 }));

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { File } from './File';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { type ImageMetadata } from '../../types/index';
@@ -20,7 +20,7 @@ export function BatchLoadedImages({
 }: BatchLoadedImagesProps) {
   const [loadedCount, setLoadedCount] = useState(0);
   const batchSize = 25; // Load 25 images at a time
-  const { setLoadingProgress, setIsLoading } = useViewerStore();
+  const { setIsLoading } = useViewerStore();
   const instanceId = useRef(Math.random().toString(36).substr(2, 9));
   
   useEffect(() => {
@@ -46,48 +46,22 @@ export function BatchLoadedImages({
     return () => clearInterval(timer);
   }, [images.length, batchSize, setIsLoading]);
 
-  // Reset when images change - keep loading state true
-  useEffect(() => {
-    setLoadedCount(0);
-    setLoadingProgress(0, images.length);
-    // Reset completion flag when new images load
-    isCompletionSent = false;
-    console.log(`BatchLoadedImages instance ${instanceId.current} initialized with ${images.length} images`);
-  }, [images, setLoadingProgress]);
-
-  // Update loading progress when loadedCount changes
-  useEffect(() => {
-    setLoadingProgress(loadedCount, images.length);
-  }, [loadedCount, images.length, setLoadingProgress]);
+  // Track images array reference to detect actual changes (not just length)
+  const imagesRef = useRef<string>('');
   
-  // Log progress and notify Service Worker
+  // Reset when images actually change (by comparing stringified array)
   useEffect(() => {
-    if (loadedCount > 0 && loadedCount <= images.length) {
-      console.log(`[${instanceId.current}] Loading batch: ${loadedCount}/${images.length} images`);
-      
-      // Send batch progress to Service Worker for forwarding
-      if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage({
-          type: 'BATCH_PROGRESS',
-          batched: loadedCount,
-          total: images.length,
-          instanceId: instanceId.current
-        });
-        
-        // If all images are loaded, notify completion (only once)
-        if (loadedCount === images.length && !isCompletionSent) {
-          isCompletionSent = true;
-          console.log(`[${instanceId.current}] Sending completion signal`);
-          setTimeout(() => {
-            navigator.serviceWorker?.controller?.postMessage({
-              type: 'LOADING_COMPLETE',
-              instanceId: instanceId.current
-            });
-          }, 500);
-        }
-      }
+    const currentImagesKey = images.map(img => img.url).join('|');
+    
+    // Only reset if images actually changed (not just re-render)
+    if (imagesRef.current !== currentImagesKey) {
+      imagesRef.current = currentImagesKey;
+      setLoadedCount(0);
+      console.log(`[${instanceId.current}] Initialized with ${images.length} images`);
+      // Reset completion flag when new images load
+      isCompletionSent = false;
     }
-  }, [loadedCount, images.length]);
+  }, [images]);
   
   return (
     <>
@@ -97,6 +71,9 @@ export function BatchLoadedImages({
             imageUrl={image.url} 
             position={[positions[index].x, positions[index].y, positions[index].z]}
             onImageClick={(url) => onImageClick(url, image)}
+            onError={() => {
+              console.warn(`Failed to load image: ${image.url}`);
+            }}
           />
         </ErrorBoundary>
       ))}

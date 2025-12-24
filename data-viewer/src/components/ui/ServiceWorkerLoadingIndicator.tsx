@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import './ServiceWorkerLoadingIndicator.css';
+import { networkTracker } from '../../utils/networkTracker';
 
 interface ServiceWorkerLoadingIndicatorProps {
   isVisible: boolean;
@@ -7,122 +8,162 @@ interface ServiceWorkerLoadingIndicatorProps {
   onLoadingComplete: () => void;
 }
 
-interface LoadingState {
-  phase: 'preparing' | 'caching' | 'batching' | 'complete';
-  cached: number;
-  batched: number;
-  total: number;
-}
-
 export function ServiceWorkerLoadingIndicator({ 
   isVisible, 
   totalImages,
   onLoadingComplete 
 }: ServiceWorkerLoadingIndicatorProps) {
-  const [loadingState, setLoadingState] = useState<LoadingState>({
-    phase: 'preparing',
-    cached: 0,
-    batched: 0,
-    total: totalImages
-  });
-
+  const [networkProgress, setNetworkProgress] = useState({ loaded: 0, total: 0 });
+  const [displayProgress, setDisplayProgress] = useState(0);
+  const animationFrameRef = useRef<number | null>(null);
+  const targetProgressRef = useRef(0);
+  
+  // Track network requests (actual HTTP requests like Network tab)
   useEffect(() => {
-    if (!isVisible) return;
-
-    // Reset state when becoming visible
-    setLoadingState({
-      phase: 'preparing',
-      cached: 0,
-      batched: 0,
-      total: totalImages
-    });
-
-    // Listen for Service Worker messages
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'IMAGE_CACHE_PROGRESS') {
-        setLoadingState(prev => ({
-          ...prev,
-          phase: 'caching',
-          cached: event.data.cached,
-          total: event.data.total
-        }));
-      } else if (event.data?.type === 'BATCH_PROGRESS') {
-        setLoadingState(prev => ({
-          ...prev,
-          phase: 'batching',
-          batched: event.data.batched
-        }));
-        
-        // Auto-complete when batch reaches total
-        if (event.data.batched >= totalImages) {
-          setTimeout(() => {
-            setLoadingState(prevState => ({
-              ...prevState,
-              phase: 'complete'
-            }));
-            
-            // Notify parent that loading is complete
-            setTimeout(() => {
-              onLoadingComplete();
-            }, 500);
-          }, 1000); // Give time for images to render
+    if (!isVisible) {
+      networkTracker.reset();
+      setDisplayProgress(0);
+      targetProgressRef.current = 0;
+      return;
+    }
+    
+    // Reset and setup
+    networkTracker.reset();
+    networkTracker.setTotalExpected(totalImages);
+    setNetworkProgress({ loaded: 0, total: totalImages });
+    setDisplayProgress(0);
+    targetProgressRef.current = 0;
+    
+    // Force refresh immediately and periodically
+    const forceRefresh = () => {
+      networkTracker.forceRefresh();
+    };
+    
+    // Multiple immediate refreshes to catch all entries (including cached 304)
+    forceRefresh(); // Immediate
+    setTimeout(forceRefresh, 50);
+    setTimeout(forceRefresh, 100);
+    setTimeout(forceRefresh, 200);
+    setTimeout(forceRefresh, 300);
+    
+    // Listen to network progress updates
+    const handleNetworkProgress = (loaded: number, total: number) => {
+      setNetworkProgress(prev => ({
+        loaded: Math.max(prev.loaded, loaded), // Never go backwards
+        total: total > 0 ? total : prev.total
+      }));
+    };
+    
+    networkTracker.addListener(handleNetworkProgress);
+    
+    // Periodic refresh to catch missed entries (more frequent)
+    const refreshInterval = setInterval(forceRefresh, 100); // Every 100ms
+    
+    return () => {
+      networkTracker.removeListener(handleNetworkProgress);
+      clearInterval(refreshInterval);
+    };
+  }, [isVisible, totalImages]);
+  
+  // Update display progress based on network progress
+  useEffect(() => {
+    const total = networkProgress.total || totalImages;
+    const loaded = networkProgress.loaded || 0;
+    
+    // Calculate percentage: 2% + (loaded/total) * 93%
+    let target = 2;
+    if (total > 0 && loaded > 0) {
+      target = 2 + (loaded / total) * 93;
+      target = Math.min(Math.max(target, 2), 95);
+    }
+    
+    // Complete at 100%
+    if (loaded >= total && total > 0) {
+      target = 100;
+    }
+    
+    targetProgressRef.current = target;
+  }, [networkProgress.loaded, networkProgress.total, totalImages]);
+  
+  // Smooth animation to target progress
+  useEffect(() => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+    
+    const animate = () => {
+      const target = targetProgressRef.current;
+      
+      setDisplayProgress(prev => {
+        if (target < prev) {
+          return prev; // Never go backwards
         }
-      } else if (event.data?.type === 'LOADING_COMPLETE') {
-        setLoadingState(prev => ({
-          ...prev,
-          phase: 'complete'
-        }));
         
-        // Notify parent that loading is complete
-        setTimeout(() => {
-          onLoadingComplete();
-        }, 500); // Brief delay to show completion
+        const diff = target - prev;
+        if (Math.abs(diff) < 0.5) {
+          return target;
+        }
+        
+        // Fast interpolation
+        const step = diff * 0.5;
+        const newProgress = prev + step;
+        const finalProgress = Math.min(Math.max(newProgress, prev), target);
+        
+        if (Math.abs(finalProgress - target) > 0.5) {
+          animationFrameRef.current = requestAnimationFrame(animate);
+        } else {
+          return target;
+        }
+        
+        return finalProgress;
+      });
+    };
+    
+    animationFrameRef.current = requestAnimationFrame(animate);
+    
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
       }
     };
-
-    // Register service worker message listener
-    navigator.serviceWorker?.addEventListener('message', handleMessage);
-
-    // Start preparation phase
-    setTimeout(() => {
-      setLoadingState(prev => ({ ...prev, phase: 'caching' }));
-    }, 300);
-
-    return () => {
-      navigator.serviceWorker?.removeEventListener('message', handleMessage);
-    };
-  }, [isVisible, totalImages, onLoadingComplete]);
-
-  const getProgressPercentage = () => {
-    switch (loadingState.phase) {
-      case 'preparing':
-        return 5;
-      case 'caching':
-        return 10 + (loadingState.cached / loadingState.total) * 60; // 10-70%
-      case 'batching':
-        return 70 + (loadingState.batched / loadingState.total) * 25; // 70-95%
-      case 'complete':
-        return 100;
-      default:
-        return 0;
+  }, [networkProgress.loaded, networkProgress.total]);
+  
+  // Check for completion
+  useEffect(() => {
+    const loaded = networkProgress.loaded || 0;
+    const total = networkProgress.total || totalImages;
+    
+    if (total > 0 && loaded >= total) {
+      setTimeout(() => {
+        onLoadingComplete();
+      }, 500);
     }
-  };
-
+  }, [networkProgress.loaded, networkProgress.total, totalImages, onLoadingComplete]);
+  
   const getPhaseText = () => {
-    switch (loadingState.phase) {
-      case 'preparing':
-        return 'Preparing images...';
-      case 'caching':
-        return `Caching images... (${loadingState.cached}/${loadingState.total})`;
-      case 'batching':
-        return `Loading images... (${loadingState.batched}/${loadingState.total})`;
-      case 'complete':
-        return 'Complete!';
-      default:
-        return 'Loading...';
+    const loaded = networkProgress.loaded || 0;
+    const total = networkProgress.total || totalImages;
+    
+    if (loaded === 0) {
+      return 'Preparing to load images...';
+    } else if (loaded < total) {
+      return `Loading images from network... (${loaded}/${total} requests)`;
+    } else {
+      return `Complete! Loaded ${total} images`;
     }
   };
-
+  
+  const getPhase = () => {
+    const loaded = networkProgress.loaded || 0;
+    const total = networkProgress.total || totalImages;
+    
+    if (loaded === 0) return 'preparing';
+    if (loaded >= total && total > 0) return 'complete';
+    return 'downloading';
+  };
+  
+  const phase = getPhase();
+  
   if (!isVisible) return null;
 
   return (
@@ -130,33 +171,33 @@ export function ServiceWorkerLoadingIndicator({
       <div className="sw-loading-container">
         <div className="sw-loading-header">
           <h3>Alzheimer's Disease Image Viewer</h3>
-          <p>Loading brain scan images...</p>
+          <p>Downloading images from server...</p>
         </div>
         
         <div className="sw-progress-container">
           <div className="sw-progress-bar">
             <div 
               className="sw-progress-fill"
-              style={{ width: `${getProgressPercentage()}%` }}
+              style={{ width: `${displayProgress}%` }}
             />
           </div>
           <div className="sw-progress-text">
-            {Math.round(getProgressPercentage())}%
+            {Math.round(displayProgress)}%
           </div>
         </div>
         
         <div className="sw-phase-indicator">
-          <div className={`sw-phase ${loadingState.phase === 'preparing' ? 'active' : loadingState.phase !== 'preparing' ? 'complete' : ''}`}>
+          <div className={`sw-phase ${phase === 'preparing' ? 'active' : phase !== 'preparing' ? 'complete' : ''}`}>
             <div className="sw-phase-dot"></div>
             <span>Preparing</span>
           </div>
-          <div className={`sw-phase ${loadingState.phase === 'caching' ? 'active' : loadingState.phase === 'batching' || loadingState.phase === 'complete' ? 'complete' : ''}`}>
+          <div className={`sw-phase ${phase === 'downloading' ? 'active' : phase === 'complete' ? 'complete' : ''}`}>
             <div className="sw-phase-dot"></div>
-            <span>Caching</span>
+            <span>Downloading</span>
           </div>
-          <div className={`sw-phase ${loadingState.phase === 'batching' ? 'active' : loadingState.phase === 'complete' ? 'complete' : ''}`}>
+          <div className={`sw-phase ${phase === 'complete' ? 'active' : ''}`}>
             <div className="sw-phase-dot"></div>
-            <span>Rendering</span>
+            <span>Complete</span>
           </div>
         </div>
         
@@ -165,8 +206,8 @@ export function ServiceWorkerLoadingIndicator({
         </div>
         
         <div className="sw-loading-tips">
-          <p>💡 Images are being cached for faster future access</p>
-          <p>🧠 Analyzing {totalImages} brain scan images</p>
+          <p>🌐 Tracking network requests (like Network tab)</p>
+          <p>📊 {networkProgress.loaded || 0} of {networkProgress.total || totalImages} HTTP requests completed</p>
         </div>
       </div>
     </div>

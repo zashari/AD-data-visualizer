@@ -1,9 +1,20 @@
 import { S3_IMAGE_PATHS, parseS3Path, TOTAL_IMAGES } from '../data/s3-actual-images';
+import { LOCAL_IMAGE_PATHS, parseLocalImagePath, TOTAL_LOCAL_IMAGES } from '../data/local-images';
 import { type ImageMetadata, type FilterState } from '../types/index';
 
 // Get image base URL from environment variables
 const getImageBaseUrl = (): string => {
   const envUrl = import.meta.env.VITE_IMAGE_BASE_URL;
+  
+  // Support untuk local development
+  if (envUrl === 'local' || envUrl?.startsWith('http://localhost')) {
+    return envUrl || 'http://localhost:8080';
+  }
+  
+  // Support untuk Vite public folder (relative path)
+  if (envUrl?.startsWith('/')) {
+    return envUrl; // Vite akan serve dari public folder
+  }
   
   if (!envUrl) {
     console.error('VITE_IMAGE_BASE_URL environment variable is not set. Please configure it in .env file.');
@@ -14,20 +25,43 @@ const getImageBaseUrl = (): string => {
 };
 
 const IMAGE_BASE_URL = getImageBaseUrl();
+const USE_LOCAL_IMAGES = import.meta.env.VITE_USE_LOCAL_IMAGES === 'true' || 
+                         IMAGE_BASE_URL.includes('localhost') || 
+                         IMAGE_BASE_URL.startsWith('/');
 
-// Create image mapping from S3 paths
+// Create image mapping
 const allImages: Record<string, string> = {};
-S3_IMAGE_PATHS.forEach(path => {
-  const url = `${IMAGE_BASE_URL}/${path}`;
-  allImages[path] = url;
-});
 
-console.log("Loaded S3 images:", TOTAL_IMAGES);
-console.log("Using CloudFront CDN:", IMAGE_BASE_URL.includes('cloudfront'));
+if (USE_LOCAL_IMAGES) {
+  // Use local images
+  console.log("Using LOCAL images:", TOTAL_LOCAL_IMAGES);
+  console.log("Image base URL:", IMAGE_BASE_URL);
+  LOCAL_IMAGE_PATHS.forEach(path => {
+    // Handle both absolute URLs and relative paths
+    const url = IMAGE_BASE_URL.startsWith('/') 
+      ? `${IMAGE_BASE_URL}/${path}` // Relative path from Vite public folder
+      : `${IMAGE_BASE_URL}/${path}`; // Absolute URL (http://localhost:8080/...)
+    allImages[path] = url;
+  });
+} else {
+  // Use S3/CloudFront images (default)
+  console.log("Loaded S3 images:", TOTAL_IMAGES);
+  console.log("Using CloudFront CDN:", IMAGE_BASE_URL.includes('cloudfront'));
+  S3_IMAGE_PATHS.forEach(path => {
+    const url = `${IMAGE_BASE_URL}/${path}`;
+    allImages[path] = url;
+  });
+}
 
 // Function to parse image path and extract metadata
 function parseImagePath(path: string, url: string): ImageMetadata {
-  const metadata = parseS3Path(path);
+  let metadata;
+  
+  if (USE_LOCAL_IMAGES) {
+    metadata = parseLocalImagePath(path);
+  } else {
+    metadata = parseS3Path(path);
+  }
   
   if (metadata) {
     return {

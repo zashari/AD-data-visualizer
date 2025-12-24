@@ -7,7 +7,14 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "setup-local-images": "node scripts/setup-local-images.js",
+    "setup-adni-dataset": "node scripts/setup-adni-dataset.js",
+    "copy-images-to-project": "node scripts/copy-images-to-project.js",
+    "reduce-dataset": "node scripts/reduce-dataset.js",
+    "count-images": "node scripts/count-images-by-directory.js",
+    "start-image-server": "node scripts/start-image-server.js",
+    "start-adni-server": "node scripts/start-adni-image-server.js"
   },
   "dependencies": {
     "@react-spring/three": "^10.0.1",

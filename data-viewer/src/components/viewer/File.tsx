@@ -1,6 +1,6 @@
 
 import { useTexture, Billboard } from '@react-three/drei';
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { useSpring, animated } from '@react-spring/three';
 import * as THREE from 'three';
 
@@ -8,12 +8,112 @@ interface FileProps {
   imageUrl: string;
   position: [number, number, number];
   onImageClick?: (imageUrl: string, imageData?: any) => void;
+  onLoad?: () => void;
+  onError?: () => void;
 }
 
-export function File({ imageUrl, position, onImageClick, ...props }: FileProps) {
+export function File({ imageUrl, position, onImageClick, onLoad, onError, ...props }: FileProps) {
   const ref = useRef<THREE.Mesh>(null!);
   const texture = useTexture(imageUrl);
   const [hovered, hover] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const hasNotifiedLoad = useRef(false);
+
+  // Track actual texture loading - more aggressive detection for cached images
+  useEffect(() => {
+    if (!texture || hasNotifiedLoad.current) return;
+    
+    const img = texture.image;
+    
+    // Immediate check for already-loaded images (cached images)
+    const checkLoaded = () => {
+      if (hasNotifiedLoad.current) return;
+      
+      if (img && img.complete && img.naturalWidth > 0 && img.naturalHeight > 0) {
+        setIsLoaded(true);
+        hasNotifiedLoad.current = true;
+        onLoad?.();
+        return true;
+      }
+      return false;
+    };
+    
+    // Check immediately
+    if (checkLoaded()) {
+      return;
+    }
+    
+    // If image exists but not loaded yet, set up listeners
+    if (img) {
+      const handleLoad = () => {
+        if (!hasNotifiedLoad.current) {
+          setIsLoaded(true);
+          hasNotifiedLoad.current = true;
+          onLoad?.();
+        }
+      };
+      
+      const handleError = () => {
+        if (!hasNotifiedLoad.current) {
+          hasNotifiedLoad.current = true;
+          onError?.();
+        }
+      };
+      
+      // Add event listeners
+      img.addEventListener('load', handleLoad, { once: true });
+      img.addEventListener('error', handleError, { once: true });
+      
+      // Aggressive polling for cached images (check every 50ms)
+      const checkInterval = setInterval(() => {
+        if (checkLoaded()) {
+          clearInterval(checkInterval);
+        }
+      }, 50);
+      
+      // Cleanup
+      return () => {
+        img.removeEventListener('load', handleLoad);
+        img.removeEventListener('error', handleError);
+        clearInterval(checkInterval);
+      };
+    } else {
+      // Texture exists but image not yet available, poll until it appears
+      const checkImageInterval = setInterval(() => {
+        if (texture.image) {
+          clearInterval(checkImageInterval);
+          // Now check if it's loaded
+          if (checkLoaded()) {
+            return;
+          }
+          // Set up listeners for the new image
+          const newImg = texture.image;
+          const handleLoad = () => {
+            if (!hasNotifiedLoad.current) {
+              setIsLoaded(true);
+              hasNotifiedLoad.current = true;
+              onLoad?.();
+            }
+          };
+          newImg.addEventListener('load', handleLoad, { once: true });
+        }
+      }, 50);
+      
+      // Timeout after 2 seconds
+      const timeout = setTimeout(() => {
+        clearInterval(checkImageInterval);
+        // Final check
+        if (texture.image && !hasNotifiedLoad.current) {
+          checkLoaded();
+        }
+      }, 2000);
+      
+      return () => {
+        clearInterval(checkImageInterval);
+        clearTimeout(timeout);
+      };
+    }
+  }, [texture, onLoad, onError]);
 
   // Spring animation for hover effect
   const springs = useSpring({

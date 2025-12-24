@@ -60,8 +60,14 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Handle CloudFront image requests with cache-first strategy
-  if (url.hostname.includes('cloudfront.net') || url.pathname.includes('/assets/images/')) {
+  // Handle image requests (CloudFront, localhost, or local /images path) with cache-first strategy
+  const isImageRequest = 
+    url.hostname.includes('cloudfront.net') || 
+    url.pathname.includes('/assets/images/') ||
+    url.pathname.startsWith('/images/') ||
+    (url.hostname === 'localhost' && url.pathname.includes('.png'));
+  
+  if (isImageRequest) {
     event.respondWith(
       caches.open(CACHE_NAME).then((cache) => {
         return cache.match(request).then((cachedResponse) => {

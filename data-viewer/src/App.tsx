@@ -9,6 +9,7 @@ import { LoadingAnimation } from './components/ui/LoadingAnimation';
 import { ServiceWorkerLoadingIndicator } from './components/ui/ServiceWorkerLoadingIndicator';
 import { useViewerStore } from './store/viewerStore';
 import { imageData, filterImages } from './utils/imageDataUtils';
+import { networkTracker } from './utils/networkTracker';
 
 function App() {
   const {
@@ -30,10 +31,14 @@ function App() {
   const handleFiltersChange = (newFilters: typeof filters) => {
     setFilters(newFilters);
     
+    // Reset and setup network tracker
+    const filtered = filterImages(newFilters);
+    const displayCount = Math.min(filtered.length, 500);
+    networkTracker.reset();
+    networkTracker.setTotalExpected(displayCount);
+    
     // Notify Service Worker to start tracking
     if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-      const filtered = filterImages(newFilters);
-      const displayCount = Math.min(filtered.length, 500);
       navigator.serviceWorker.controller.postMessage({
         type: 'START_TRACKING',
         total: displayCount
@@ -49,11 +54,16 @@ function App() {
     setServiceWorkerLoading(false);
   };
 
-  // Initialize Service Worker tracking on first load
+  // Initialize network tracker and Service Worker tracking on first load
   useEffect(() => {
+    const filtered = filterImages(filters);
+    const displayCount = Math.min(filtered.length, 500);
+    
+    // Initialize network tracker
+    networkTracker.setTotalExpected(displayCount);
+    
+    // Notify Service Worker to start tracking
     if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-      const filtered = filterImages(filters);
-      const displayCount = Math.min(filtered.length, 500);
       navigator.serviceWorker.controller.postMessage({
         type: 'START_TRACKING',
         total: displayCount
